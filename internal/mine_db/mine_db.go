@@ -47,11 +47,11 @@ func get_db() (map[string]any, error) {
 func Get(key string) (any, error) {
 	mine_db, cur_error := get_db()
 	if cur_error != nil {
-		return -1, cur_error
+		return nil, cur_error
 	}
 	ans, ok := mine_db[key]
 	if !ok {
-		return -1, MyError{fmt.Sprintf("the following key is not in the mine_db: %s", key), time.Now()}
+		return nil, MyError{fmt.Sprintf("the following key is not in the mine_db: %s", key), time.Now()}
 	}
 	return ans, nil
 }
