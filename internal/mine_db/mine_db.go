@@ -1,4 +1,4 @@
-package main
+package mine_db
 
 import (
 	"encoding/json"
