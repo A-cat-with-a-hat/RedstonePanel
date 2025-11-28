@@ -38,7 +38,7 @@ func (curSafeMap *concurrencySafeMap) setVal(key string, val any) {
 }
 
 func TestMineDb(t *testing.T) {
-	curLink, err := getMineDb()
+	curLink, err := GetMineDb()
 	if err != nil {
 		t.Errorf("%s\n", err)
 	}

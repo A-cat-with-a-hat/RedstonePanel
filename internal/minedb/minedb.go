@@ -73,7 +73,7 @@ func (curDb *mineDb) Set(key string, v any) error {
 var once sync.Once
 var curMineDb *mineDb
 
-func getMineDb() (*mineDb, error) {
+func GetMineDb() (*mineDb, error) {
 	var err error = nil
 	once.Do(func() {
 		curMineDb = &mineDb{}
