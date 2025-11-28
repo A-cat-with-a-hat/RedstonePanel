@@ -3,45 +3,81 @@ package minedb
 import (
 	"math/rand"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
 )
 
-func checkGet(t *testing.T, key string, expectedValue any) {
-	valGet, err := Get(key)
+func checkGet(t *testing.T, curDb *mineDb, key string, expectedValue any) {
+	var valGet = expectedValue
+	err := curDb.Get(key, &valGet)
 	if err != nil {
-		t.Errorf("%s", err)
+		t.Errorf("%s\n", err)
 	}
 	if !reflect.DeepEqual(valGet, expectedValue) {
-		t.Errorf("Need value %v, got: %v", expectedValue, valGet)
+		t.Errorf("With key = %s value %v is needed, but got: %v\n", key, expectedValue, valGet)
 	}
 }
 
-func checkSet(t *testing.T, key string, value any) {
-	err := Set(key, value)
+func checkSet(t *testing.T, curDb *mineDb, key string, value any) {
+	err := curDb.Set(key, value)
 	if err != nil {
-		t.Errorf("%s", err)
+		t.Errorf("%s\n", err)
 	}
-	checkGet(t, key, value)
+}
+
+type concurrencySafeMap struct {
+	mu     sync.Mutex
+	curMap map[string]any
+}
+
+func (curSafeMap *concurrencySafeMap) setVal(key string, val any) {
+	curSafeMap.mu.Lock()
+	curSafeMap.curMap[key] = val
+	curSafeMap.mu.Unlock()
 }
 
 func TestMineDb(t *testing.T) {
+	curLink, err := getMineDb()
+	if err != nil {
+		t.Errorf("%s\n", err)
+	}
 	keys := []string{"Time", "Location", "Mode", "What", "Doctor", "Ostrich"}
-	values := []any{"2 am", float64(38), "who", []any{float64(1), float64(2), float64(3)}, float64(342), "AAAA", nil} // they should probably be random but i just dont care
-	// Turns out that json turns all numbers into float64 and all slices into []any see here for more information: https://pkg.go.dev/encoding/json#Unmarshal
-	// Why this is true is beyond me and I cannot fix this problem, so I hope everyone likes working with floats and doesnt care what they're storing in their arrays
+	values := []any{float64(123.34), 38, "who", [3]int{1, 2, 3}, 342, "AAAA", nil} // these should probably be random but i dont care
 	curRandSource := rand.NewSource(38)
 	randFunc := rand.New(curRandSource)
-	var correctMineDb map[string]any = make(map[string]any)
 	var testSize int = 100
-	usedKeys := []string{}
+	var correctMineDb = &(concurrencySafeMap{})
+	correctMineDb.curMap = make(map[string]any)
 	for i := 0; i < testSize; i++ {
+		go func() { // test without a grace period for runtime errors
+			curKey := keys[randFunc.Intn(len(keys))]
+			curVal := values[randFunc.Intn(len(values))]
+			checkSet(t, curLink, curKey, curVal)
+		}()
+	}
+	for i := 0; i < testSize; i++ { // test without multiflow
 		curKey := keys[randFunc.Intn(len(keys))]
 		curVal := values[randFunc.Intn(len(values))]
-		correctMineDb[curKey] = curVal
-		usedKeys = append(usedKeys, curKey)
-		checkSet(t, curKey, curVal)
+		correctMineDb.setVal(curKey, curVal)
+		checkSet(t, curLink, curKey, curVal)
 	}
+	for k := range correctMineDb.curMap {
+		var valToGet any = correctMineDb.curMap[k]
+		checkGet(t, curLink, k, valToGet)
+	}
+
 	for i := 0; i < testSize; i++ {
-		checkGet(t, usedKeys[i], correctMineDb[usedKeys[i]])
+		go func() {
+			curKey := keys[randFunc.Intn(len(keys))]
+			curVal := values[randFunc.Intn(len(values))]
+			correctMineDb.setVal(curKey, curVal)
+			checkSet(t, curLink, curKey, curVal)
+		}()
+		time.Sleep(50 * time.Millisecond) // test wtih a grace period to check that mineDb works fine multiflow. Is it needed? I dont know, but without it the tests fail)
+	}
+	for k := range correctMineDb.curMap {
+		var valToGet any = correctMineDb.curMap[k]
+		checkGet(t, curLink, k, valToGet)
 	}
 }
