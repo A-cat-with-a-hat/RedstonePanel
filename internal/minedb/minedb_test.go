@@ -3,9 +3,9 @@ package minedb
 import (
 	"math/rand"
 	"reflect"
+	"strconv"
 	"sync"
 	"testing"
-	"time"
 )
 
 func checkGet(t *testing.T, curDb *mineDb, key string, expectedValue any) {
@@ -33,51 +33,86 @@ type concurrencySafeMap struct {
 
 func (curSafeMap *concurrencySafeMap) setVal(key string, val any) {
 	curSafeMap.mu.Lock()
+	defer curSafeMap.mu.Unlock()
 	curSafeMap.curMap[key] = val
-	curSafeMap.mu.Unlock()
+}
+
+func (curSafeMap *concurrencySafeMap) getVal(key string) any {
+	curSafeMap.mu.Lock()
+	defer curSafeMap.mu.Unlock()
+	return curSafeMap.curMap[key]
+}
+
+func (curSafeMap *concurrencySafeMap) getKeys() []string {
+	curSafeMap.mu.Lock()
+	defer curSafeMap.mu.Unlock()
+	var curKeys []string = []string{}
+	for k := range curSafeMap.curMap {
+		curKeys = append(curKeys, k)
+	}
+	return curKeys
+}
+
+type concurrencySafeNum struct {
+	mu     sync.Mutex
+	curNum int
+}
+
+func (curSafeNum *concurrencySafeNum) addNum(val int) {
+	curSafeNum.mu.Lock()
+	defer curSafeNum.mu.Unlock()
+	curSafeNum.curNum += val
+}
+
+func (curSafeNum *concurrencySafeNum) getNum() int {
+	curSafeNum.mu.Lock()
+	defer curSafeNum.mu.Unlock()
+	return curSafeNum.curNum
 }
 
 func TestMineDb(t *testing.T) {
-	curLink, err := GetMineDb()
+	curLink, err := NewMineDb()
 	if err != nil {
 		t.Errorf("%s\n", err)
 	}
-	keys := []string{"Time", "Location", "Mode", "What", "Doctor", "Ostrich"}
-	values := []any{float64(123.34), 38, "who", [3]int{1, 2, 3}, 342, "AAAA", nil} // these should probably be random but i dont care
-	curRandSource := rand.NewSource(38)
-	randFunc := rand.New(curRandSource)
-	var testSize int = 100
-	var correctMineDb = &(concurrencySafeMap{})
-	correctMineDb.curMap = make(map[string]any)
-	for i := 0; i < testSize; i++ {
-		go func() { // test without a grace period for runtime errors
-			curKey := keys[randFunc.Intn(len(keys))]
-			curVal := values[randFunc.Intn(len(values))]
-			checkSet(t, curLink, curKey, curVal)
-		}()
-	}
-	for i := 0; i < testSize; i++ { // test without multiflow
-		curKey := keys[randFunc.Intn(len(keys))]
-		curVal := values[randFunc.Intn(len(values))]
-		correctMineDb.setVal(curKey, curVal)
-		checkSet(t, curLink, curKey, curVal)
-	}
-	for k := range correctMineDb.curMap {
-		var valToGet any = correctMineDb.curMap[k]
-		checkGet(t, curLink, k, valToGet)
-	}
-
-	for i := 0; i < testSize; i++ {
-		go func() {
-			curKey := keys[randFunc.Intn(len(keys))]
-			curVal := values[randFunc.Intn(len(values))]
+	t.Run("Performance test", func(t *testing.T) {
+		var testSize int = 1000
+		for i := 0; i < testSize; i++ {
+			go func() { // test for runtime errors
+				curKey := strconv.Itoa(i)
+				curVal := i
+				checkSet(t, curLink, curKey, curVal)
+			}()
+		}
+	})
+	t.Run("Unit tests", func(t *testing.T) {
+		var testSize int = 1000
+		keys := []string{"Time", "Location", "Mode", "What", "Doctor", "Ostrich"}
+		values := []any{float64(123.34), 38, "who", [3]int{1, 2, 3}, 342, "AAAA", nil} // these should probably be random but i dont care
+		curRandSource := rand.NewSource(38)
+		randFunc := rand.New(curRandSource)
+		var correctMineDb = &(concurrencySafeMap{})
+		correctMineDb.curMap = make(map[string]any)
+		randomizedKeys := []string{}
+		randomizedVals := []any{}
+		var keyInd concurrencySafeNum
+		var valInd concurrencySafeNum
+		for i := 0; i < 10*testSize; i++ {
+			randomizedKeys = append(randomizedKeys, keys[randFunc.Intn(len(keys))]) // Turns out that getting a randon number is not a concurrecny safe thing to do :(
+			randomizedVals = append(randomizedVals, values[randFunc.Intn(len(values))])
+		}
+		for i := 0; i < testSize; i++ { // test without multiflow
+			curKey := randomizedKeys[keyInd.getNum()]
+			curVal := randomizedVals[valInd.getNum()]
+			keyInd.addNum(1)
+			valInd.addNum(1)
 			correctMineDb.setVal(curKey, curVal)
 			checkSet(t, curLink, curKey, curVal)
-		}()
-		time.Sleep(50 * time.Millisecond) // test wtih a grace period to check that mineDb works fine multiflow. Is it needed? I dont know, but without it the tests fail)
-	}
-	for k := range correctMineDb.curMap {
-		var valToGet any = correctMineDb.curMap[k]
-		checkGet(t, curLink, k, valToGet)
-	}
+		}
+		allKeys := correctMineDb.getKeys()
+		for ind := range allKeys {
+			var valToGet any = correctMineDb.getVal(allKeys[ind])
+			checkGet(t, curLink, allKeys[ind], valToGet)
+		}
+	})
 }
