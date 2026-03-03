@@ -2,7 +2,9 @@ package minedb
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"sync"
 )
@@ -18,6 +20,8 @@ func (e DBError) Error() string {
 type mineDb struct {
 	mu    sync.Mutex
 	dbMap map[string]any
+
+	logger logger
 }
 
 func (curDb *mineDb) saveDb() error {
@@ -36,16 +40,19 @@ func (curDb *mineDb) getDb() (map[string]any, error) {
 	defer curDb.mu.Unlock()
 	var retMap map[string]any = make(map[string]any)
 	res, err := os.Open(fileDbName)
+
 	if err == nil {
+		curDb.logger.Info("read database file to initialize data")
 		curDec := json.NewDecoder(res)
 		curDec.Decode(&retMap)
 		res.Close()
+	} else if errors.Is(err, fs.ErrNotExist) {
+		curDb.logger.Warn("could not read database file because it does not exist")
 	} else {
-		curDb.mu.Unlock()
-		err = curDb.saveDb()
-		curDb.mu.Lock()
-		return retMap, err
+		curDb.logger.Error("failed to read database file")
+		return nil, fmt.Errorf("failed to initialize database from file due to error: %w", err)
 	}
+
 	return retMap, err
 }
 
@@ -91,11 +98,11 @@ func (curDb *mineDb) Set(key string, v any) error {
 var once sync.Once
 var curMineDb *mineDb
 
-func NewMineDb() (*mineDb, error) {
+func NewMineDb(logger logger) (*mineDb, error) {
 	var err error = nil
 	once.Do(func() {
-		curMineDb = &mineDb{}
-		curMineDb.dbMap, err = curMineDb.getDb()
+		curMineDb = &mineDb{logger: logger}
+		curMineDb.dbMap, err = curMineDb.getDb() // err != nil it could mean that mineDb wasnt created before which is expected
 	})
 	return curMineDb, err
 }
