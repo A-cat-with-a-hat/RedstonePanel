@@ -2,10 +2,13 @@ package minedb
 
 import (
 	"math/rand"
+	"minedb/mocks"
 	"reflect"
 	"strconv"
 	"sync"
 	"testing"
+
+	"github.com/golang/mock/gomock"
 )
 
 func checkGet(t *testing.T, curDb *mineDb, key string, expectedValue any) {
@@ -71,7 +74,14 @@ func (curSafeNum *concurrencySafeNum) getNum() int {
 }
 
 func TestMineDb(t *testing.T) {
-	curLink, err := NewMineDb()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	logger := mocks.NewMocklogger(ctrl)
+	logger.EXPECT().Info("read database file to initialize data").MaxTimes(1)
+	logger.EXPECT().Warn("could not read database file because it does not exist").MaxTimes(1)
+
+	curLink, err := NewMineDb(logger)
 	if err != nil {
 		t.Errorf("%s\n", err)
 	}

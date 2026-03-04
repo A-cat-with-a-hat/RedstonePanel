@@ -9,8 +9,6 @@ import (
 	"sync"
 )
 
-var fileDbName string = "minedb.json"
-
 type DBError string
 
 func (e DBError) Error() string {
@@ -18,10 +16,10 @@ func (e DBError) Error() string {
 }
 
 type mineDb struct {
-	mu    sync.Mutex
-	dbMap map[string]any
-
-	logger logger
+	mu         sync.Mutex
+	dbMap      map[string]any
+	fileDbName string
+	dbLog      logger
 }
 
 func (curDb *mineDb) saveDb() error {
@@ -31,7 +29,7 @@ func (curDb *mineDb) saveDb() error {
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(fileDbName, toWrite, 0644)
+	err = os.WriteFile(curDb.fileDbName, toWrite, 0644)
 	return err
 }
 
@@ -39,20 +37,19 @@ func (curDb *mineDb) getDb() (map[string]any, error) {
 	curDb.mu.Lock()
 	defer curDb.mu.Unlock()
 	var retMap map[string]any = make(map[string]any)
-	res, err := os.Open(fileDbName)
-
+	res, err := os.Open(curDb.fileDbName)
 	if err == nil {
-		curDb.logger.Info("read database file to initialize data")
+		curDb.dbLog.Info("read database file to initialize data")
 		curDec := json.NewDecoder(res)
 		curDec.Decode(&retMap)
 		res.Close()
 	} else if errors.Is(err, fs.ErrNotExist) {
-		curDb.logger.Warn("could not read database file because it does not exist")
+		curDb.dbLog.Warn("could not read database file because it does not exist")
+		err = nil
 	} else {
-		curDb.logger.Error("failed to read database file")
+		curDb.dbLog.Error("failed to read database file")
 		return nil, fmt.Errorf("failed to initialize database from file due to error: %w", err)
 	}
-
 	return retMap, err
 }
 
@@ -101,8 +98,8 @@ var curMineDb *mineDb
 func NewMineDb(logger logger) (*mineDb, error) {
 	var err error = nil
 	once.Do(func() {
-		curMineDb = &mineDb{logger: logger}
-		curMineDb.dbMap, err = curMineDb.getDb() // err != nil it could mean that mineDb wasnt created before which is expected
+		curMineDb = &mineDb{dbLog: logger, fileDbName: "minedb.json"}
+		curMineDb.dbMap, err = curMineDb.getDb()
 	})
 	return curMineDb, err
 }
